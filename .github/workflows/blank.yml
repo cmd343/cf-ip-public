@@ -1,0 +1,43 @@
+name: Cloudflare Auto SpeedTest
+
+on:
+  # 定时触发：UTC时间每天 0点 和 12点 分别自动跑一次（北京时间 早上8点 和 晚上8点）
+  schedule:
+    - cron: '0 0,12 * * *'
+  # 允许你在网页上手动点击按钮立即运行
+  workflow_dispatch:
+
+jobs:
+  speedtest:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 检出仓库代码
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. 下载并解压成熟的 Cloudflare 优选测速工具（以 CloudflareSpeedTest 为例）
+      - name: Download CFST
+        run: |
+          wget -O CFst.tar.gz https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.2.5/CloudflareSpeedTest_linux_amd64.tar.gz
+          tar -zxvf CFst.tar.gz
+
+      # 3. 运行测速核心命令（可根据需要调整测速参数）
+      - name: Run SpeedTest
+        run: |
+          # -url: 填入你自己的 Pages 或 Workers 自定义域名，进行精准 HTTPing 测速
+          # -n 200: 测试 200 个 IP，-t 4: 延迟上限 400ms 左右，-p 1: 输出 1 个最好的
+          # 脚本会自动生成 result.csv
+          ./CloudflareSpeedTest -url https://你的域名/ -n 300 -t 350 -dn 10 -o result.csv
+
+      # 4. 自动把测速结果提交并保存到仓库中
+      - name: Commit and Push Results
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          # 仅提取优选出的 IP 列表存为 ip.txt 方便后续调用
+          awk -F, 'NR>1 {print $1}' result.csv > ip.txt
+          
+          git add result.csv ip.txt
+          git commit -m "Update Cloudflare Best IPs: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+          git push
