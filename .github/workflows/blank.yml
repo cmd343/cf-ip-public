@@ -1,4 +1,4 @@
-name: Cloudflare Automated Blind Scan
+name: Cloudflare High-Performance Blind Scan
 
 on:
   schedule:
@@ -6,23 +6,22 @@ on:
   workflow_dispatch:
 
 jobs:
-  blind-scan:
-  # 统一在 Linux 环境下运行，确保 shell 脚本与路径兼容
+  high-perf-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 纯净冷门 IP 生成器（已优化：O(1) 索引采样，彻底剔除万人骑大热段）
-      - name: Generate Pure Cold IP Pool
+      # 1. 高性能与纯净兼顾的 IP 生成器：引入大带宽承载段，摒弃“带宽枯竭”的极端冷门段
+      - name: Generate High-Performance IP Pool
         run: |
           python3 - << 'EOF'
           import random
           import ipaddress
 
-          print("Generating pure cold candidate IP pool...")
+          print("Generating high-performance & clean candidate IP pool...")
 
-          # 严厉屏蔽污染严重的主流“万人骑”大热公开网段
+          # 严厉屏蔽污染严重的主流“万人骑”大热网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
@@ -38,11 +37,11 @@ jobs:
 
           candidates = set()
           
-          # 聚焦于延迟表现较好、日常公开脚本极少大面积轰炸的优质冷门边缘子网
+          # 【核心优化】：升级种子网段，引入吞吐能力更强、具备大水管出口的高性能边缘/托管段
           target_seed_ranges = [
-              "162.159.32.0/20",  
-              "198.41.192.0/20",  
-              "141.101.64.0/18"   
+              "162.159.192.0/18",  # 高性能边缘与大流量承载段
+              "198.41.128.0/17",   # 核心托管与高吞吐段
+              "172.64.0.0/14"      # 避开热点 172.67 的周边优质高带宽区
           ]
 
           for s_net in target_seed_ranges:
@@ -53,7 +52,8 @@ jobs:
               
               sampled_count = 0
               attempts = 0
-              while sampled_count < 150 and attempts < 1000:
+              # 适当多抽样一些候选节点，供本地以高标准进行测速挑选
+              while sampled_count < 200 and attempts < 1500:
                   attempts += 1
                   offset = random.randint(1, total_hosts)
                   ip_obj = net_obj[offset]
@@ -66,7 +66,7 @@ jobs:
               for ip in final_list:
                   f.write(ip + "\n")
                   
-          print(f"Successfully generated {len(final_list)} elite cold candidate IPs.")
+          print(f"Successfully generated {len(final_list)} high-performance candidate IPs.")
           EOF
 
       # 2. 自动下载并解压官方最新版 CloudflareST 测速工具
@@ -76,25 +76,23 @@ jobs:
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 稳妥的标准测速调用（回归最安全的无歧义原生参数，彻底杜绝参数错位卡死）
+      # 3. 标准测速调用（交由 CFST 全自动筛选出真正具备下载速度的节点）
       - name: Run Safe SpeedTest
         run: |
           cd cfst_linux_amd64
-          # 使用最干净、最标准的参数调用，依靠 CFST 内置的最优逻辑全自动筛选
           ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -o ../result.csv
 
-      # 4. 智能防御与提交（包含严格的非空文件校验，绝对不让空结果覆盖你的 ip.txt）
+      # 4. 安全校验与提交（防止空结果污染，确保稳定产出）
       - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          # 检查 result.csv 是否存在且行数大于 1（即必须测出有效 IP 才肯放行）
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
               echo "SpeedTest successful. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
               git add result.csv ip.txt custom_ip.txt
-              git commit -m "Auto Blind Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+              git commit -m "High-Perf Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
               git push
           else
               echo "Error: SpeedTest yielded no valid IPs or result.csv is missing. Protecting existing ip.txt."
