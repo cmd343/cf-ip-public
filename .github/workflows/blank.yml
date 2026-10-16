@@ -27,7 +27,7 @@ jobs:
           # -url: 填入你自己的 Pages 或 Workers 自定义域名，进行精准 HTTPing 测速
           # -n 200: 测试 200 个 IP，-t 4: 延迟上限 400ms 左右，-p 1: 输出 1 个最好的
           # 脚本会自动生成 result.csv
-          ./CloudflareSpeedTest -url https://你的域名/ -n 300 -t 350 -dn 10 -o result.csv
+          ./CloudflareSpeedTest -url https://nanxia.jinzhengen.cc.cd/ -n 300 -t 350 -dn 10 -o result.csv
 
       # 4. 自动把测速结果提交并保存到仓库中
       - name: Commit and Push Results
