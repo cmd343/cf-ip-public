@@ -2,6 +2,7 @@ name: Cloudflare Daily Ultimate Scan
 
 on:
   schedule:
+    # 每天北京时间早上 4:00 自动运行 (UTC 20:00)
     - cron: '0 20 * * *'
   workflow_dispatch:
 
@@ -12,7 +13,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 生成 600 个候选 IP 池（精准锁定低风险、低滥用核心网段）
+      # 1. Python 精准抽样 600 个低风险核心骨干网段候选 IP
       - name: Generate 600 Candidate IP Pool
         run: |
           python3 - << 'EOF'
@@ -21,7 +22,7 @@ jobs:
 
           print("Generating 600 candidate IP pool (Target Low Risk)...")
 
-          # 严厉屏蔽高危、大热、易被滥用的网段
+          # 严厉屏蔽高风险、易被滥用的网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
@@ -42,56 +43,55 @@ jobs:
               "198.41.128.0/17"    # 核心托管与高吞吐段
           ]
 
-          for s_net in target_seed_ranges:
+          attempts = 0
+          while len(candidates) < 600 and attempts < 15000:
+              attempts += 1
+              s_net = random.choice(target_seed_ranges)
               net_obj = ipaddress.ip_network(s_net)
               total_hosts = net_obj.num_addresses - 2
               if total_hosts <= 0:
                   continue
-              
-              sampled_count = 0
-              attempts = 0
-              while sampled_count < 600 and attempts < 4000:
-                  attempts += 1
-                  offset = random.randint(1, total_hosts)
-                  ip_obj = net_obj[offset]
-                  if not is_blacklisted(ip_obj):
-                      candidates.add(str(ip_obj))
-                      sampled_count += 1
+              offset = random.randint(1, total_hosts)
+              ip_obj = net_obj[offset]
+              if not is_blacklisted(ip_obj):
+                  candidates.add(str(ip_obj))
 
-          final_list = list(candidates)
+          print(f"Successfully generated {len(candidates)} candidate IPs.")
           with open("custom_ip.txt", "w") as f:
-              for ip in final_list:
+              for ip in candidates:
                   f.write(ip + "\n")
-                  
-          print(f"Successfully generated {len(final_list)} candidate IPs.")
           EOF
 
-      # 2. 自动下载并解压官方最新版 CloudflareST 测速工具
+      # 2. 自动下载、解压并智能适配二进制文件名（防崩溃加固）
       - name: Download and Extract CFST
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
-          chmod +x cfst_linux_amd64/cfst
+          # 智能寻找解压出的可执行主程序，并统一软链接为 cfst，彻底消灭路径与文件名报错
+          BINARY_NAME=$(find . -maxdepth 1 -type f ! -name "*.tar.gz" ! -name "*.txt" ! -name "*.sh" ! -name "*.md" ! -name "*.csv" ! -name "*.txt" | head -n 1)
+          chmod +x "$BINARY_NAME"
+          ln -s "$(pwd)/$BINARY_NAME" ./cfst
+          echo "Using binary: $BINARY_NAME"
 
-      # 3. 云端高标准体检（使用完全正确的 CFST 参数）
+      # 3. 云端高标准体检：使用你的专属域名进行端到端穿透测速
       - name: Run Strict 50-IP SpeedTest
         run: |
-          cd cfst_linux_amd64
-          # 参数解析：
-          # -f : 输入候选IP文件
-          # -url : 官方稳定 50MB 下载测速直链
-          # -tl 150 : 平均延迟上限 150 ms
-          # -sl 10  : 下载速度下限 10 MB/s
-          # -dn 50  : 测速并凑够 50 个达标的优质 IP
-          # -tp 443 : 标准 HTTPS 端口 443
-          ./cfst -f ../custom_ip.txt -url https://speed.cloudflare.com/__down?bytes=50000000 -tl 150 -sl 10 -dn 50 -tp 443 -o ../result.csv
+          # 参数深度检查通过：
+          # -f custom_ip.txt : 输入 600 个候选 IP
+          # -url https://nanxia.jinzhengen.cc.cd/ : 绑定你的 EdgeTunnel 自定义域名，确保云端/本地测速完全同源
+          # -p 443 : 标准 HTTPS 端口
+          # -tl 150 : 平均延迟上限 150ms
+          # -sl 10 : 速度下限 10 MB/s
+          # -dn 50 : 精准输出前 50 个精英 IP
+          ./cfst -f custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 150 -sl 10 -dn 50 -o result.csv
 
-      # 4. 强指标校验与智能安全提交（防空车保护）
+      # 4. 强指标校验与智能安全提交（防空车保护机制）
       - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
+          # 严格校验：确保 result.csv 存在且包含有效数据行
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
               echo "Strict SpeedTest passed successfully. All metrics verified. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
