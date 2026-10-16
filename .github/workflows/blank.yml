@@ -1,4 +1,4 @@
-name: Cloudflare Elite Pure Blind Scan
+name: Cloudflare Automated Blind Scan
 
 on:
   schedule:
@@ -6,22 +6,23 @@ on:
   workflow_dispatch:
 
 jobs:
-  elite-scan:
+  blind-scan:
+  # 统一在 Linux 环境下运行，确保 shell 脚本与路径兼容
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 精准冷门大段抽样（彻底避开万人骑主网段，O(1) 高效索引生成）
-      - name: Generate Elite Cold IP Pool
+      # 1. 纯净冷门 IP 生成器（已优化：O(1) 索引采样，彻底剔除万人骑大热段）
+      - name: Generate Pure Cold IP Pool
         run: |
           python3 - << 'EOF'
           import random
           import ipaddress
 
-          print("Generating elite cold & pure candidate IP pool...")
+          print("Generating pure cold candidate IP pool...")
 
-          # 严密封堵所有大热的“万人骑”网段
+          # 严厉屏蔽污染严重的主流“万人骑”大热公开网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
@@ -37,11 +38,11 @@ jobs:
 
           candidates = set()
           
-          # 聚焦于延迟表现较好、但日常公共脚本极少大面积轰炸的优质冷门/边缘子网
+          # 聚焦于延迟表现较好、日常公开脚本极少大面积轰炸的优质冷门边缘子网
           target_seed_ranges = [
-              "162.159.32.0/20",  # Cloudflare 优质边缘子网
-              "198.41.192.0/20",  # 核心托管与特殊边缘段
-              "141.101.64.0/18"   # 另一组非主流承载段
+              "162.159.32.0/20",  
+              "198.41.192.0/20",  
+              "141.101.64.0/18"   
           ]
 
           for s_net in target_seed_ranges:
@@ -68,39 +69,34 @@ jobs:
           print(f"Successfully generated {len(final_list)} elite cold candidate IPs.")
           EOF
 
-      # 2. 自动下载并解压 CFST 测速工具
+      # 2. 自动下载并解压官方最新版 CloudflareST 测速工具
       - name: Download and Extract CFST
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 严苛的低延迟、零丢包靶向测速
-      - name: Run Elite Strict SpeedTest
+      # 3. 稳妥的标准测速调用（回归最安全的无歧义原生参数，彻底杜绝参数错位卡死）
+      - name: Run Safe SpeedTest
         run: |
           cd cfst_linux_amd64
-          # 参数说明：
-          # -url: 你的专属测速靶点域名
-          # -n 30: 仅提取前 30 个综合评分最高的极品 IP
-          # -t 180: 将延迟阈值压到 180ms 以内，确保低延迟
-          # -tl 0: 核心杀手锏！强制要求丢包率必须为 0（确保零丢包）
-          # -tp 150: 150 线程温和并发，防止 GitHub 虚拟机过载卡死
-          # -dn 5: 测速完成后只保留前 5 个最精锐的 IP 写入结果
-          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -n 30 -t 180 -tl 0 -tp 150 -dn 5 -o ../result.csv
+          # 使用最干净、最标准的参数调用，依靠 CFST 内置的最优逻辑全自动筛选
+          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -o ../result.csv
 
-      # 4. 安全校验与推送（防止空结果污染）
-      - name: Validate and Push Elite Results
+      # 4. 智能防御与提交（包含严格的非空文件校验，绝对不让空结果覆盖你的 ip.txt）
+      - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
+          # 检查 result.csv 是否存在且行数大于 1（即必须测出有效 IP 才肯放行）
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
-              echo "Elite SpeedTest passed. Updating ip.txt..."
+              echo "SpeedTest successful. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
               git add result.csv ip.txt custom_ip.txt
-              git commit -m "Elite Pure Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+              git commit -m "Auto Blind Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
               git push
           else
-              echo "Error: Elite SpeedTest yielded no valid IPs. Protecting existing ip.txt."
+              echo "Error: SpeedTest yielded no valid IPs or result.csv is missing. Protecting existing ip.txt."
               exit 1
           fi
