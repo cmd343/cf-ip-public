@@ -18,7 +18,7 @@ jobs:
           import random
           import ipaddress
 
-          print("Generating 1500 candidate IP pool for strict sub-50ms filtering...")
+          print("Generating 1500 candidate IP pool...")
 
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
@@ -63,30 +63,27 @@ jobs:
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
-          chmod +x cfst_linux_amd64/cfst
+          # 直接把 cfst 可执行文件移到当前根目录，方便操作
+          mv cfst_linux_amd64/cfst ./cfst
+          chmod +x cfst
 
-      # 🎯 核心测速与智能兜底逻辑
-      - name: Run Strict SpeedTest with Smart Fallback
+      # 🚀 直接在根目录运行测速，采用绝对稳妥的智能兜底策略
+      - name: Run SpeedTest with Smart Fallback
         run: |
-          cd cfst_linux_amd64
+          echo "=== 尝试第一轮测速 (严格要求：延迟<=50ms, 速度>=10MB/s) ==="
+          ./cfst -f custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 50 -sl 10 -dn 50 -o result.csv || true
           
-          echo "=== 尝试第一轮：严格按照你的设定 (-tl 50 -sl 10) ==="
-          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 50 -sl 10 -dn 50 -o ../result.csv
-          
-          # 检查 result.csv 是否包含有效测速数据（行数大于 1）
-          VALID_LINES=$(wc -l < ../result.csv)
-          
-          if [ "$VALID_LINES" -le 1 ]; then
-              echo "⚠️ 严格条件下未筛选出满足要求的 50 个 IP（可能由于 GitHub 节点网络波动）。"
-              echo "=== 启动智能保底：自动放宽至 -tl 200 -sl 2，确保为你榨取出最优秀的 50 个 IP！ ==="
-              ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 200 -sl 2 -dn 50 -o ../result.csv
+          # 检查 result.csv 是否存在且有有效行数
+          if [ ! -f "result.csv" ] || [ $(wc -l < result.csv) -le 1 ]; then
+              echo "⚠️ 严苛条件下未达标，自动启动智能兜底：放宽至延迟<=150ms, 速度>=2MB/s..."
+              ./cfst -f custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 150 -sl 2 -dn 50 -o result.csv
           else
-              echo "🎉 完美！严格条件测速成功，已直接产出高质量 IP。"
+              echo "🎉 完美！严苛测速通过！"
           fi
 
-          # 🔍 强制回显：把最终产出的前 50 个最优 IP 直接打印在日志里，绝对能看见！
+          # 🔍 强制回显前 50 个 IP 到控制台日志，让你一眼能看到
           echo "==================== 最终优选出的 TOP 50 IP 列表 ===================="
-          cat ../result.csv
+          cat result.csv
           echo "=================================================================="
 
       - name: Validate and Push Results
@@ -101,6 +98,6 @@ jobs:
               git commit -m "Elite IP Update (Top 50): $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
               git push
           else
-              echo "Error: result.csv is still empty. Aborting."
+              echo "Error: result.csv generation failed completely."
               exit 1
           fi
