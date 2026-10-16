@@ -12,7 +12,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 扩大至 600 个候选池：精准锁定低风险、低滥用的核心骨干及边缘段
+      # 1. 生成 600 个候选 IP 池（精准锁定低风险、低滥用核心网段）
       - name: Generate 600 Candidate IP Pool
         run: |
           python3 - << 'EOF'
@@ -21,6 +21,7 @@ jobs:
 
           print("Generating 600 candidate IP pool (Target Low Risk)...")
 
+          # 严厉屏蔽高危、大热、易被滥用的网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
@@ -72,20 +73,20 @@ jobs:
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 云端高标准体检：更换为官方稳定测速 URL，防止网络挂起
+      # 3. 云端高标准体检（使用完全正确的 CFST 参数）
       - name: Run Strict 50-IP SpeedTest
         run: |
           cd cfst_linux_amd64
-          # 参数说明：
-          # -url : 替换为 Cloudflare 官方 50MB 稳定测速下载地址，彻底杜绝卡死
-          # -t 150 : 延迟控制在 150ms 以内
-          # -tl 0  : 零丢包
-          # -sl 10 : 速度下限 10 MB/s
-          # -tp 150: 150 线程并发
-          # -n 50  : 输出前 50 个精英 IP
-          ./cfst -f ../custom_ip.txt -url https://speed.cloudflare.com/__down?bytes=50000000 -t 150 -tl 0 -sl 10 -tp 150 -n 50 -o ../result.csv
+          # 参数解析：
+          # -f : 输入候选IP文件
+          # -url : 官方稳定 50MB 下载测速直链
+          # -tl 150 : 平均延迟上限 150 ms
+          # -sl 10  : 下载速度下限 10 MB/s
+          # -dn 50  : 测速并凑够 50 个达标的优质 IP
+          # -tp 443 : 标准 HTTPS 端口 443
+          ./cfst -f ../custom_ip.txt -url https://speed.cloudflare.com/__down?bytes=50000000 -tl 150 -sl 10 -dn 50 -tp 443 -o ../result.csv
 
-      # 4. 强指标校验与智能安全提交
+      # 4. 强指标校验与智能安全提交（防空车保护）
       - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
