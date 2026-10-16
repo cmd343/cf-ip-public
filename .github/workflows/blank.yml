@@ -1,4 +1,4 @@
-name: Cloudflare Balanced Blind Scan
+name: Cloudflare Elite Pure Blind Scan
 
 on:
   schedule:
@@ -6,30 +6,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  balanced-scan:
+  elite-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 生成大容量但去除了“万人骑”大热段的优质候选池（确保数量充足，绝不空车）
-      - name: Generate Balanced IP Pool
+      # 1. 精准冷门大段抽样（彻底避开万人骑主网段，O(1) 高效索引生成）
+      - name: Generate Elite Cold IP Pool
         run: |
           python3 - << 'EOF'
           import random
           import ipaddress
 
-          print("Generating balanced & pure candidate IP pool...")
+          print("Generating elite cold & pure candidate IP pool...")
 
-          # 严厉屏蔽污染最严重的“万人骑”大热公开段
+          # 严密封堵所有大热的“万人骑”网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
-              ipaddress.ip_network("172.67.0.0/16")
+              ipaddress.ip_network("172.67.0.0/16"),
+              ipaddress.ip_network("108.162.192.0/18")
           ]
 
-          def is_blacklisted(ip_str):
-              ip_obj = ipaddress.ip_address(ip_str)
+          def is_blacklisted(ip_obj):
               for net in blacklist_networks:
                   if ip_obj in net:
                       return True
@@ -37,30 +37,35 @@ jobs:
 
           candidates = set()
           
-          # 扩大边缘和次级冷门网段的覆盖范围，确保有足够基数供高并发筛选
+          # 聚焦于延迟表现较好、但日常公共脚本极少大面积轰炸的优质冷门/边缘子网
           target_seed_ranges = [
-              "162.159.0.0/16",   # Cloudflare 边缘大段
-              "198.41.128.0/17",  # 核心托管与边缘段
-              "190.93.240.0/20"   # 相对小众的区域承载段
+              "162.159.32.0/20",  # Cloudflare 优质边缘子网
+              "198.41.192.0/20",  # 核心托管与特殊边缘段
+              "141.101.64.0/18"   # 另一组非主流承载段
           ]
 
           for s_net in target_seed_ranges:
               net_obj = ipaddress.ip_network(s_net)
-              all_hosts = list(net_obj.hosts())
-              # 每个网段随机抽样 200 个，确保总量在 400-500 个左右
-              sampled = random.sample(all_hosts, min(len(all_hosts), 200))
-              for ip in sampled:
-                  ip_str = str(ip)
-                  if not is_blacklisted(ip_str):
-                      candidates.add(ip_str)
+              total_hosts = net_obj.num_addresses - 2
+              if total_hosts <= 0:
+                  continue
+              
+              sampled_count = 0
+              attempts = 0
+              while sampled_count < 150 and attempts < 1000:
+                  attempts += 1
+                  offset = random.randint(1, total_hosts)
+                  ip_obj = net_obj[offset]
+                  if not is_blacklisted(ip_obj):
+                      candidates.add(str(ip_obj))
+                      sampled_count += 1
 
-          # 写入文件，控制在 400 个左右，既丰富又高效
-          final_list = list(candidates)[:400]
+          final_list = list(candidates)
           with open("custom_ip.txt", "w") as f:
               for ip in final_list:
                   f.write(ip + "\n")
                   
-          print(f"Successfully prepared {len(final_list)} candidate IPs for robust scanning.")
+          print(f"Successfully generated {len(final_list)} elite cold candidate IPs.")
           EOF
 
       # 2. 自动下载并解压 CFST 测速工具
@@ -70,23 +75,32 @@ jobs:
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 高并发闪电测速：扩大候选基数但保持高线程（-tp 600），要求选出前 50 个优质 IP
-      - name: Run Robust SpeedTest
+      # 3. 严苛的低延迟、零丢包靶向测速
+      - name: Run Elite Strict SpeedTest
         run: |
           cd cfst_linux_amd64
-          # -n 50：输出前 50 个最佳 IP
-          # -t 250：适当放宽一点超时阈值（250ms），防止漏掉好 IP
-          # -tp 600：600 线程高并发，400 个 IP 可以在 20 秒内全部测完
-          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -n 50 -t 250 -tp 600 -dn 10 -o ../result.csv
+          # 参数说明：
+          # -url: 你的专属测速靶点域名
+          # -n 30: 仅提取前 30 个综合评分最高的极品 IP
+          # -t 180: 将延迟阈值压到 180ms 以内，确保低延迟
+          # -tl 0: 核心杀手锏！强制要求丢包率必须为 0（确保零丢包）
+          # -tp 150: 150 线程温和并发，防止 GitHub 虚拟机过载卡死
+          # -dn 5: 测速完成后只保留前 5 个最精锐的 IP 写入结果
+          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -n 30 -t 180 -tl 0 -tp 150 -dn 5 -o ../result.csv
 
-      # 4. 提交结果到仓库
-      - name: Commit and Push Results
+      # 4. 安全校验与推送（防止空结果污染）
+      - name: Validate and Push Elite Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          awk -F, 'NR>1 {print $1}' result.csv > ip.txt
-          
-          git add result.csv ip.txt custom_ip.txt
-          git commit -m "Balanced Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
-          git push
+          if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
+              echo "Elite SpeedTest passed. Updating ip.txt..."
+              awk -F, 'NR>1 {print $1}' result.csv > ip.txt
+              git add result.csv ip.txt custom_ip.txt
+              git commit -m "Elite Pure Scan Update: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+              git push
+          else
+              echo "Error: Elite SpeedTest yielded no valid IPs. Protecting existing ip.txt."
+              exit 1
+          fi
