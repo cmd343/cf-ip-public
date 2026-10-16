@@ -13,14 +13,14 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. Python 精准抽样 600 个低风险核心骨干网段候选 IP
-      - name: Generate 600 Candidate IP Pool
+      # 1. 扩大样本：精准抽样 1500 个低风险骨干网段候选 IP（应对严苛的 50ms 筛选）
+      - name: Generate 1500 Candidate IP Pool
         run: |
           python3 - << 'EOF'
           import random
           import ipaddress
 
-          print("Generating 600 candidate IP pool (Target Low Risk)...")
+          print("Generating 1500 candidate IP pool for strict sub-50ms filtering...")
 
           # 严厉屏蔽高风险、易被滥用的网段
           blacklist_networks = [
@@ -44,7 +44,8 @@ jobs:
           ]
 
           attempts = 0
-          while len(candidates) < 600 and attempts < 15000:
+          # 扩大到 1500 个候选 IP，确保 50ms 筛选下不会断档
+          while len(candidates) < 1500 and attempts < 30000:
               attempts += 1
               s_net = random.choice(target_seed_ranges)
               net_obj = ipaddress.ip_network(s_net)
@@ -69,19 +70,15 @@ jobs:
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 云端高标准体检：进入子目录测速，结果输出回根目录
-      - name: Run Strict 50-IP SpeedTest
+      # 3. 云端极限体检：延迟上限死锁 50ms，速度下限 10MB/s
+      - name: Run Strict Sub-50ms SpeedTest
         run: |
           cd cfst_linux_amd64
           # 参数说明：
-          # -f ../custom_ip.txt : 读取根目录的候选 IP
-          # -url : 绑定你的 EdgeTunnel 自定义域名
-          # -p 443 : 标准 HTTPS 端口
-          # -tl 150 : 平均延迟上限 150ms
-          # -sl 10 : 速度下限 10 MB/s
-          # -dn 50 : 精准输出前 50 个精英 IP
-          # -o ../result.csv : 结果保存回根目录
-          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 150 -sl 10 -dn 50 -o ../result.csv
+          # -tl 50 : 严格限定平均延迟必须在 50ms 以内
+          # -sl 10 : 速度下限必须达到 10 MB/s
+          # -dn 50 : 挑选前 50 个顶级精英 IP
+          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 50 -sl 10 -dn 50 -o ../result.csv
 
       # 4. 强指标校验与智能安全提交（防空车保护机制）
       - name: Validate and Push Results
@@ -89,14 +86,13 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          # 严格校验：确保根目录下的 result.csv 存在且包含有效数据行
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
-              echo "Strict SpeedTest passed successfully. All metrics verified. Updating ip.txt..."
+              echo "Strict sub-50ms SpeedTest passed successfully. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
               git add result.csv ip.txt custom_ip.txt
-              git commit -m "Daily 4AM Ultimate Pure Elite Update (600 Pool, 50 IPs, Speed >= 10MB/s): $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+              git commit -m "Daily 4AM Sub-50ms Elite Update (1500 Pool, 50 IPs, Speed >= 10MB/s): $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
               git push
           else
-              echo "Error: SpeedTest did not meet strict criteria or result.csv is missing. Protecting existing ip.txt and aborting."
+              echo "Error: Sub-50ms criteria too strict or result.csv missing. Protecting existing ip.txt and aborting."
               exit 1
           fi
