@@ -15,18 +15,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. 下载并解压成熟的 Cloudflare 优选测速工具（以 CloudflareSpeedTest 为例）
+      # 2. 自动通过 GitHub API 获取最新版本的 CloudflareSpeedTest 并解压
       - name: Download CFST
         run: |
-          wget -O CFst.tar.gz https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.2.5/CloudflareSpeedTest_linux_amd64.tar.gz
+          wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
 
-      # 3. 运行测速核心命令（可根据需要调整测速参数）
+      # 3. 运行测速核心命令（已为你配置好专属域名）
       - name: Run SpeedTest
         run: |
-          # -url: 填入你自己的 Pages 或 Workers 自定义域名，进行精准 HTTPing 测速
-          # -n 200: 测试 200 个 IP，-t 4: 延迟上限 400ms 左右，-p 1: 输出 1 个最好的
-          # 脚本会自动生成 result.csv
           ./CloudflareSpeedTest -url https://nanxia.jinzhengen.cc.cd/ -n 300 -t 350 -dn 10 -o result.csv
 
       # 4. 自动把测速结果提交并保存到仓库中
