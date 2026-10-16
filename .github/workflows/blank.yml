@@ -62,28 +62,26 @@ jobs:
                   f.write(ip + "\n")
           EOF
 
-      # 2. 自动下载、解压并智能适配二进制文件名（防崩溃加固）
+      # 2. 自动下载并解压官方最新版 CloudflareST 测速工具
       - name: Download and Extract CFST
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
-          # 智能寻找解压出的可执行主程序，并统一软链接为 cfst，彻底消灭路径与文件名报错
-          BINARY_NAME=$(find . -maxdepth 1 -type f ! -name "*.tar.gz" ! -name "*.txt" ! -name "*.sh" ! -name "*.md" ! -name "*.csv" ! -name "*.txt" | head -n 1)
-          chmod +x "$BINARY_NAME"
-          ln -s "$(pwd)/$BINARY_NAME" ./cfst
-          echo "Using binary: $BINARY_NAME"
+          chmod +x cfst_linux_amd64/cfst
 
-      # 3. 云端高标准体检：使用你的专属域名进行端到端穿透测速
+      # 3. 云端高标准体检：进入子目录测速，结果输出回根目录
       - name: Run Strict 50-IP SpeedTest
         run: |
-          # 参数深度检查通过：
-          # -f custom_ip.txt : 输入 600 个候选 IP
-          # -url https://nanxia.jinzhengen.cc.cd/ : 绑定你的 EdgeTunnel 自定义域名，确保云端/本地测速完全同源
+          cd cfst_linux_amd64
+          # 参数说明：
+          # -f ../custom_ip.txt : 读取根目录的候选 IP
+          # -url : 绑定你的 EdgeTunnel 自定义域名
           # -p 443 : 标准 HTTPS 端口
           # -tl 150 : 平均延迟上限 150ms
           # -sl 10 : 速度下限 10 MB/s
           # -dn 50 : 精准输出前 50 个精英 IP
-          ./cfst -f custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 150 -sl 10 -dn 50 -o result.csv
+          # -o ../result.csv : 结果保存回根目录
+          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 150 -sl 10 -dn 50 -o ../result.csv
 
       # 4. 强指标校验与智能安全提交（防空车保护机制）
       - name: Validate and Push Results
@@ -91,7 +89,7 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          # 严格校验：确保 result.csv 存在且包含有效数据行
+          # 严格校验：确保根目录下的 result.csv 存在且包含有效数据行
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
               echo "Strict SpeedTest passed successfully. All metrics verified. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
