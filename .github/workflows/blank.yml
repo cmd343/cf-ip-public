@@ -16,12 +16,14 @@ jobs:
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
-          # 自动寻找解压出来的真实可执行文件名并赋予权限
-          chmod +x CloudflareSpeedTest
+          # 进入解压出来的文件夹并赋予执行权限
+          cd cfst_linux_amd64
+          chmod +x cfst
 
       - name: Run SpeedTest
         run: |
-          ./CloudflareSpeedTest -url https://nanxia.jinzhengen.cc.cd/ -n 300 -t 350 -dn 10 -o result.csv
+          # 运行位于文件夹内的测速程序，并将结果输出到上一级目录
+          ./cfst_linux_amd64/cfst -url https://nanxia.jinzhengen.cc.cd/ -n 300 -t 350 -dn 10 -o result.csv
 
       - name: Commit and Push Results
         run: |
