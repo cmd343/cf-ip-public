@@ -1,4 +1,4 @@
-name: Cloudflare Auto SpeedTest
+name: Cloudflare Wild IP Blind Scan
 
 on:
   schedule:
@@ -6,25 +6,57 @@ on:
   workflow_dispatch:
 
 jobs:
-  speedtest:
+  blind-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # 1. 准备冷门 IP 候选池（你可以通过 Python 脚本从你的数据源抓取，或者直接在这里写入/合并你的冷门段）
+      - name: Generate Wild IP List
+        run: |
+          python3 - << 'EOF'
+          import urllib.request
+          import json
+
+          # 示例：你可以通过自定义逻辑、API、或者内置的优质冷门段/抓取逻辑生成动态 IP 池
+          # 这里以注入冷门/扩展边缘候选 IP 为例（你也可以在此处对接 Fofa/Censys API）
+          wild_ips = [
+              # 示例冷门/优质边缘段，可按需扩展或替换为你的动态获取逻辑
+              "104.18.0.1", "104.18.32.1", "172.67.0.1", "108.162.192.1"
+          ]
+          
+          # 也可以从公共渠道或你的加密源拉取一份独特的初始种子
+          try:
+              url = "https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt"
+              req = urllib.request.urlopen(url, timeout=10)
+              lines = [line.decode('utf-8').strip() for line in req.readlines()[:500]] # 仅取前500个进行精细化冷门盲扫
+              wild_ips.extend(lines)
+          except Exception as e:
+              print(f"Fetch base failed: {e}")
+
+          with open("custom_ip.txt", "w") as f:
+              for ip in set(wild_ips):
+                  if ip:
+                      f.write(ip + "\n")
+          print(f"Generated {len(wild_ips)} candidate IPs for blind scanning.")
+          EOF
+
+      # 2. 下载并解压 CFST 测速工具
       - name: Download and Extract CFST
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
-          # 进入解压出来的文件夹并赋予执行权限
-          cd cfst_linux_amd64
-          chmod +x cfst
+          chmod +x cfst_linux_amd64/cfst
 
-      - name: Run SpeedTest
+      # 3. 针对动态盲扫出来的 IP 池进行精准测速
+      - name: Run Wild SpeedTest
         run: |
-          # 运行位于文件夹内的测速程序，并将结果输出到上一级目录
-          ./cfst_linux_amd64/cfst -url https://nanxia.jinzhengen.cc.cd/ -n 300 -t 350 -dn 10 -o result.csv
+          cd cfst_linux_amd64
+          # -f 指定我们刚刚动态生成的 custom_ip.txt 盲扫池
+          ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -n 200 -t 350 -dn 10 -o ../result.csv
 
+      # 4. 提交优选结果到仓库
       - name: Commit and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
@@ -32,6 +64,6 @@ jobs:
           
           awk -F, 'NR>1 {print $1}' result.csv > ip.txt
           
-          git add result.csv ip.txt
-          git commit -m "Update Cloudflare Best IPs: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+          git add result.csv ip.txt custom_ip.txt
+          git commit -m "Auto Blind Scan & Update IPs: $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
           git push
