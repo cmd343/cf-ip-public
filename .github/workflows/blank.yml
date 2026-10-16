@@ -2,7 +2,6 @@ name: Cloudflare Daily Ultimate Scan
 
 on:
   schedule:
-    # 每天北京时间早上 4:00 自动运行 (UTC 20:00)
     - cron: '0 20 * * *'
   workflow_dispatch:
 
@@ -13,7 +12,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 扩大样本：精准抽样 1500 个低风险骨干网段候选 IP（应对严苛的 50ms 筛选）
       - name: Generate 1500 Candidate IP Pool
         run: |
           python3 - << 'EOF'
@@ -22,7 +20,6 @@ jobs:
 
           print("Generating 1500 candidate IP pool for strict sub-50ms filtering...")
 
-          # 严厉屏蔽高风险、易被滥用的网段
           blacklist_networks = [
               ipaddress.ip_network("104.16.0.0/12"),
               ipaddress.ip_network("104.24.0.0/14"),
@@ -39,12 +36,11 @@ jobs:
 
           candidates = set()
           target_seed_ranges = [
-              "162.159.192.0/18",  # 高性能边缘与大流量承载段
-              "198.41.128.0/17"    # 核心托管与高吞吐段
+              "162.159.192.0/18",
+              "198.41.128.0/17"
           ]
 
           attempts = 0
-          # 扩大到 1500 个候选 IP，确保 50ms 筛选下不会断档
           while len(candidates) < 1500 and attempts < 30000:
               attempts += 1
               s_net = random.choice(target_seed_ranges)
@@ -63,36 +59,48 @@ jobs:
                   f.write(ip + "\n")
           EOF
 
-      # 2. 自动下载并解压官方最新版 CloudflareST 测速工具
       - name: Download and Extract CFST
         run: |
           wget -O CFst.tar.gz $(curl -s https://api.github.com/repos/XIU2/CloudflareSpeedTest/releases/latest | grep "browser_download_url.*linux_amd64.tar.gz" | cut -d '"' -f 4)
           tar -zxvf CFst.tar.gz
           chmod +x cfst_linux_amd64/cfst
 
-      # 3. 云端极限体检：延迟上限死锁 50ms，速度下限 10MB/s
-      - name: Run Strict Sub-50ms SpeedTest
+      # 🎯 核心测速与智能兜底逻辑
+      - name: Run Strict SpeedTest with Smart Fallback
         run: |
           cd cfst_linux_amd64
-          # 参数说明：
-          # -tl 50 : 严格限定平均延迟必须在 50ms 以内
-          # -sl 10 : 速度下限必须达到 10 MB/s
-          # -dn 50 : 挑选前 50 个顶级精英 IP
+          
+          echo "=== 尝试第一轮：严格按照你的设定 (-tl 50 -sl 10) ==="
           ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 50 -sl 10 -dn 50 -o ../result.csv
+          
+          # 检查 result.csv 是否包含有效测速数据（行数大于 1）
+          VALID_LINES=$(wc -l < ../result.csv)
+          
+          if [ "$VALID_LINES" -le 1 ]; then
+              echo "⚠️ 严格条件下未筛选出满足要求的 50 个 IP（可能由于 GitHub 节点网络波动）。"
+              echo "=== 启动智能保底：自动放宽至 -tl 200 -sl 2，确保为你榨取出最优秀的 50 个 IP！ ==="
+              ./cfst -f ../custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 200 -sl 2 -dn 50 -o ../result.csv
+          else
+              echo "🎉 完美！严格条件测速成功，已直接产出高质量 IP。"
+          fi
 
-      # 4. 强指标校验与智能安全提交（防空车保护机制）
+          # 🔍 强制回显：把最终产出的前 50 个最优 IP 直接打印在日志里，绝对能看见！
+          echo "==================== 最终优选出的 TOP 50 IP 列表 ===================="
+          cat ../result.csv
+          echo "=================================================================="
+
       - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
           if [ -f "result.csv" ] && [ $(wc -l < result.csv) -gt 1 ]; then
-              echo "Strict sub-50ms SpeedTest passed successfully. Updating ip.txt..."
+              echo "SpeedTest results secured. Updating ip.txt..."
               awk -F, 'NR>1 {print $1}' result.csv > ip.txt
               git add result.csv ip.txt custom_ip.txt
-              git commit -m "Daily 4AM Sub-50ms Elite Update (1500 Pool, 50 IPs, Speed >= 10MB/s): $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
+              git commit -m "Elite IP Update (Top 50): $(date '+%Y-%m-%d %H:%M:%S')" || exit 0
               git push
           else
-              echo "Error: Sub-50ms criteria too strict or result.csv missing. Protecting existing ip.txt and aborting."
+              echo "Error: result.csv is still empty. Aborting."
               exit 1
           fi
