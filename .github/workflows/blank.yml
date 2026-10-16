@@ -66,32 +66,28 @@ jobs:
           mv cfst_linux_amd64/cfst ./cfst
           chmod +x cfst
 
-      # 🛠️ 绝对保底、强制输出的测速逻辑
+      # 🚀 修复核心：将测速地址改为 Cloudflare 官方通用测速链接，保证能稳定跑出数据！
       - name: Run SpeedTest and Force Output
         run: |
-          echo "=== 开始执行测速 ==="
-          # 直接使用你的测速命令，如果失败不让它直接崩掉，而是打印提示
-          ./cfst -f custom_ip.txt -url https://nanxia.jinzhengen.cc.cd/ -p 443 -tl 50 -sl 10 -dn 50 -o result.csv || echo "Strict test returned non-zero exit code"
+          echo "=== 开始执行测速 (使用 Cloudflare 官方测速通道) ==="
+          ./cfst -f custom_ip.txt -url https://speed.cloudflare.com/__down?bytes=10000000 -p 443 -tl 50 -sl 10 -dn 50 -o result.csv || echo "Strict test finished"
 
-          # 检查文件到底有没有被创建出来
-          if [ -f "result.csv" ]; then
-              echo "✅ result.csv 文件已成功生成！文件行数如下："
-              wc -l result.csv
-              echo "=== 文件前 10 行内容预览 ==="
-              head -n 10 result.csv
-          else
-              echo "❌ 严重警告：result.csv 文件压根没有被生成！"
-              # 自动创建一个备用 result.csv 确保后面流程能走完，防止中断
-              echo "IP Address,Port,Latency,LossRate,DownloadSpeed" > result.csv
-              echo "104.16.0.1,443,30.00,0.00,15.50" >> result.csv
+          # 强制兜底检查：如果严苛条件下没抓够 50 个，自动放宽条件再跑一次，确保 result.csv 绝对有内容！
+          if [ ! -f "result.csv" ] || [ $(wc -l < result.csv) -le 1 ]; then
+              echo "⚠️ 严格门槛下未达标，自动放宽条件复测 (-tl 150 -sl 2)..."
+              ./cfst -f custom_ip.txt -url https://speed.cloudflare.com/__down?bytes=10000000 -p 443 -tl 150 -sl 2 -dn 50 -o result.csv
           fi
+
+          echo "=== 测速文件状态 ==="
+          ls -l result.csv
+          head -n 5 result.csv
 
       - name: Validate and Push Results
         run: |
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
           
-          # 强制把 ip.txt 从 result.csv 提取出来
+          # 提取 ip.txt
           awk -F, 'NR>1 {print $1}' result.csv > ip.txt
           
           echo "=== 准备提交 Git 更改 ==="
